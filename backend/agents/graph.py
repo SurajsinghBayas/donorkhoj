@@ -150,10 +150,17 @@ TOP SHAP FEATURES (most influential factors):
 Write a structured clinical report with: Executive Summary, Compatibility Analysis, Risk Factors, Recommendations.
 Keep it concise (200-250 words). Use Indian transplant guidelines context."""
 
-        build = lambda m: get_llm_client(m, temperature=0.1)
+        build = lambda m: get_llm_client(m, temperature=0.1, max_tokens=700)
+
+        def _non_empty(resp):
+            if not (resp.content or "").strip():
+                raise ValueError("empty LLM response")
+
         response, _ = await ainvoke_with_fallback(
             build, MATCHING_MODELS,
             [SystemMessage(content=MATCHING_AGENT_PROMPT), HumanMessage(content=prompt)],
+            rounds=2,
+            validator=_non_empty,
         )
         report = response.content
         steps = add_step({**state, "steps": steps}, "report", "completed")

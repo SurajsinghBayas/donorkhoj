@@ -7,6 +7,7 @@ import AppShell from './components/layout/AppShell';
 
 import Landing from './pages/Landing';
 import HowItWorks from './pages/HowItWorks';
+import GuidePage from './pages/GuidePage';
 import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
 
@@ -15,6 +16,8 @@ import RecipientOverview from './pages/recipient/RecipientOverview';
 import FindDonors from './pages/recipient/FindDonors';
 import ScreeningPage from './pages/shared/ScreeningPage';
 import MatchesPage from './pages/shared/MatchesPage';
+import ProfilePage from './pages/shared/ProfilePage';
+import HospitalsPage from './pages/shared/HospitalsPage';
 import ReviewQueue from './pages/doctor/ReviewQueue';
 import AdminOverview from './pages/admin/AdminOverview';
 
@@ -62,6 +65,7 @@ export default function App() {
         {/* Public */}
         <Route path="/" element={<Landing />} />
         <Route path="/how-it-works" element={<HowItWorks />} />
+        <Route path="/guide" element={<GuidePage />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
 
@@ -78,6 +82,9 @@ export default function App() {
 
           <Route path="/doctor" element={<Protected roles={['doctor']}><ReviewQueue /></Protected>} />
           <Route path="/admin" element={<Protected roles={['admin']}><AdminOverview /></Protected>} />
+
+          <Route path="/profile" element={<ProfilePage />} />
+          <Route path="/hospitals" element={<HospitalsPage />} />
         </Route>
 
         {/* Fallback */}

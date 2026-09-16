@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from sqlalchemy import text
 from database import engine
 from models.models import Base
-from routers import auth, screening, matching, agents
+from routers import auth, screening, matching, agents, hospitals
 
 load_dotenv()
 
@@ -66,6 +66,7 @@ app.include_router(auth.router)
 app.include_router(screening.router)
 app.include_router(matching.router)
 app.include_router(agents.router)
+app.include_router(hospitals.router)
 
 
 @app.get("/")

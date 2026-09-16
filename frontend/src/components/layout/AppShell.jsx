@@ -3,6 +3,7 @@ import { NavLink, Outlet, useNavigate, Link } from 'react-router-dom';
 import {
   LayoutGrid, ClipboardCheck, Search, HeartHandshake,
   Inbox, BarChart3, LogOut, MessageSquare, Menu, X,
+  User as UserIcon, Building2, BookOpen,
 } from 'lucide-react';
 import { useAppStore } from '../../lib/store';
 import { ROLE_LABELS } from '../../lib/constants';
@@ -11,23 +12,33 @@ import Logo from '../ui/Logo';
 import Badge from '../ui/Badge';
 import ChatDrawer from '../chat/ChatDrawer';
 
+const SHARED_NAV = [
+  { to: '/hospitals', label: 'Hospitals', icon: Building2 },
+  { to: '/guide', label: 'Transplant guide', icon: BookOpen },
+  { to: '/profile', label: 'Profile', icon: UserIcon },
+];
+
 const NAV = {
   donor: [
     { to: '/donor', label: 'Overview', icon: LayoutGrid, end: true },
     { to: '/donor/screening', label: 'Medical screening', icon: ClipboardCheck },
     { to: '/donor/matches', label: 'My matches', icon: HeartHandshake },
+    ...SHARED_NAV,
   ],
   recipient: [
     { to: '/recipient', label: 'Overview', icon: LayoutGrid, end: true },
     { to: '/recipient/find', label: 'Find donors', icon: Search },
     { to: '/recipient/screening', label: 'Medical screening', icon: ClipboardCheck },
     { to: '/recipient/matches', label: 'My matches', icon: HeartHandshake },
+    ...SHARED_NAV,
   ],
   doctor: [
     { to: '/doctor', label: 'Review queue', icon: Inbox, end: true },
+    ...SHARED_NAV,
   ],
   admin: [
     { to: '/admin', label: 'Overview', icon: BarChart3, end: true },
+    ...SHARED_NAV,
   ],
 };
 

@@ -63,6 +63,12 @@ Every year, thousands of patients in India await life-saving organ transplants w
 - One-click full matching pipeline with live stage-by-stage progress (WebSocket + polling fallback).
 - Match reports with ensemble scores and compatibility classes.
 
+### Profiles, Hospitals & Guide (all roles)
+- **Profile** (`/profile`) — editable contact, country/state/city, treating hospital, plus a medical snapshot (blood group, eligibility, urgency).
+- **Hospitals** (`/hospitals`) — live directory powered by OpenStreetMap + Nominatim: city/state/country search, geolocation "near me", radius and transplant-centre filters, phone/website/directions, and one-tap "set as my hospital".
+- **Transplant guide** (`/guide`, public) — the whole journey in plain, easy English: organs, donor/recipient steps, test glossary, Indian law (THO Act/NOTTO), post-transplant care, FAQs.
+- Match lists show **real names** on both sides, so every pairing is human-readable at a glance.
+
 ### Doctor Portal
 - Review queue of AI-scored matches awaiting decision.
 - Approve / reject with clinical notes (recorded with doctor identity).
@@ -240,6 +246,12 @@ workups across kidney, liver, and heart) plus pre-scored ML matches in every lif
 state — pending review and approved — so the whole journey is visible immediately.
 An in-app tour of the ML model and agents lives at `/how-it-works` (linked in the footer).
 
+Each demo donor/recipient also has a realistic lab-report PDF generated from their
+actual screening values (`backend/lab_reports/generate_reports.py` → `backend/lab_reports/`;
+re-run it after changing demo data). Reports are viewable in-app with human-in-the-loop
+access control: owners see their own, doctors see all, and match counterparties can
+inspect each other's source labs before any decision.
+
 ---
 
 ## API Reference
@@ -293,6 +305,21 @@ Submit body: blood group, infection statuses, cancer history, lifestyle, per-org
 | WS | `/agents/ws/{job_id}` | — | Live pipeline step streaming |
 | POST | `/agents/chat` | ✅ | DonorBot reply as **SSE** (`data: {"token": …}` … `data: [DONE]`) |
 | GET | `/agents/chat/history` | ✅ | Last 50 chat messages |
+
+### Hospitals (`/hospitals`) — live data, no bundled lists
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| GET | `/hospitals/nearby?lat=&lon=&radius_km=&transplant_only=` | ✅ | Live hospitals around coordinates (OpenStreetMap Overpass, multi-mirror failover) |
+| GET | `/hospitals/search?city=&state=&country=&radius_km=&transplant_only=` | ✅ | Geocode a place (Nominatim) then live-search hospitals around it |
+
+Each result carries name, address, phone, website, emergency flag, coordinates, a directions link, and a `transplant_relevant` flag.
+
+### Profile (`/auth`)
+
+| Method | Endpoint | Auth | Description |
+|--------|----------|------|-------------|
+| PUT | `/auth/profile` | ✅ | Update full name, phone, country/state/city, treating hospital |
 
 ---
 

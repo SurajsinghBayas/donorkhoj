@@ -41,13 +41,16 @@ export default function PipelineModal({ jobId, organ, onClose, onDone }) {
   const [stages, setStages] = useState({}); // id → { status, data }
   const [result, setResult] = useState(null);
   const [failed, setFailed] = useState(null);
+  const [elapsed, setElapsed] = useState(0);
   const doneRef = useRef(false);
 
   useEffect(() => {
     if (!jobId) return;
     let ws;
     let pollTimer;
+    let tickTimer;
     let closed = false;
+    const startedAt = Date.now();
 
     const apply = (msg) => {
       if (msg.step === 'completed' && msg.status === 'completed') {
@@ -60,42 +63,47 @@ export default function PipelineModal({ jobId, organ, onClose, onDone }) {
       if (msg.status === 'failed') setFailed(msg.step);
     };
 
-    const startPolling = () => {
-      // Fallback when the socket drops before completion
-      pollTimer = setInterval(async () => {
-        if (doneRef.current || closed) return clearInterval(pollTimer);
-        try {
-          const res = await api.get(`/agents/matching/${jobId}`);
-          const { status, steps, result: r, error } = res.data;
-          (steps || []).forEach((st) =>
-            setStages((s) => ({ ...s, [st.step]: { status: st.status, data: st.data } }))
-          );
-          if (status === 'completed') {
-            setResult(r || {});
-            doneRef.current = true;
-            clearInterval(pollTimer);
-          } else if (status === 'failed') {
-            setFailed(error || 'pipeline');
-            clearInterval(pollTimer);
-          }
-        } catch { /* keep polling */ }
-      }, 2000);
+    const pollOnce = async () => {
+      if (doneRef.current || closed) return;
+      try {
+        const res = await api.get(`/agents/matching/${jobId}`);
+        const { status, steps, result: r, error } = res.data;
+        (steps || []).forEach((st) =>
+          setStages((s) => ({ ...s, [st.step]: { status: st.status, data: st.data } }))
+        );
+        if (status === 'completed') {
+          setResult(r || {});
+          doneRef.current = true;
+        } else if (status === 'failed') {
+          setFailed(error || 'pipeline');
+        }
+      } catch { /* keep polling */ }
     };
+
+    // Always-on polling: converges even if the socket connects late or drops
+    // frames (fast local stages finish before the socket opens).
+    pollOnce();
+    pollTimer = setInterval(() => {
+      if (doneRef.current || closed) return clearInterval(pollTimer);
+      pollOnce();
+    }, 2500);
+    tickTimer = setInterval(() => {
+      if (doneRef.current) return clearInterval(tickTimer);
+      setElapsed(Math.floor((Date.now() - startedAt) / 1000));
+    }, 1000);
 
     try {
       ws = new WebSocket(`${WS_URL}/agents/ws/${jobId}`);
       ws.onmessage = (e) => {
         try { apply(JSON.parse(e.data)); } catch { /* ignore malformed frame */ }
       };
-      ws.onerror = () => startPolling();
-      ws.onclose = () => { if (!doneRef.current) startPolling(); };
       // Keep-alive ping so the server loop stays open
       const ping = setInterval(() => ws.readyState === 1 && ws.send('ping'), 15000);
-      return () => { closed = true; clearInterval(ping); clearInterval(pollTimer); ws.close(); };
+      return () => { closed = true; clearInterval(ping); clearInterval(pollTimer); clearInterval(tickTimer); ws.close(); };
     } catch {
-      startPolling();
+      /* polling already covers us */
     }
-    return () => { closed = true; clearInterval(pollTimer); };
+    return () => { closed = true; clearInterval(pollTimer); clearInterval(tickTimer); };
   }, [jobId]);
 
   const running = !result && !failed;
@@ -106,7 +114,7 @@ export default function PipelineModal({ jobId, organ, onClose, onDone }) {
       onClose={running ? undefined : onClose}
       title="Matching pipeline"
       subtitle={running
-        ? `Analysing donor–recipient compatibility for ${titleCase(organ)}.`
+        ? `Analysing donor–recipient compatibility for ${titleCase(organ)} · ${elapsed}s elapsed`
         : result ? 'Analysis complete.' : 'Pipeline stopped.'}
     >
       <div className="px-6 py-5">

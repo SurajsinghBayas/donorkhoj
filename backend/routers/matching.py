@@ -57,19 +57,25 @@ async def get_my_matches(
     else:
         result = await db.execute(select(Match).where(Match.recipient_id == current_user.id).order_by(Match.created_at.desc()))
     matches = result.scalars().all()
-    return [
-        {
+    out = []
+    for m in matches:
+        donor = await db.get(User, m.donor_id)
+        recipient = await db.get(User, m.recipient_id)
+        out.append({
             "id": m.id,
             "organ": m.organ,
+            "donor_id": m.donor_id,
+            "recipient_id": m.recipient_id,
+            "donor_name": donor.full_name if donor else "Unknown",
+            "recipient_name": recipient.full_name if recipient else "Unknown",
             "ensemble_score": m.ensemble_score,
             "compatibility_class": m.compatibility_class,
             "status": m.status.value if m.status else "pending",
             "agent_report": m.agent_report,
             "shap_values": m.shap_values,
             "created_at": m.created_at.isoformat() if m.created_at else None,
-        }
-        for m in matches
-    ]
+        })
+    return out
 
 
 @router.get("/matches/pending")
@@ -88,6 +94,8 @@ async def get_pending_matches(current_user: User = Depends(get_current_user), db
         out.append({
             "id": m.id,
             "organ": m.organ,
+            "donor_id": m.donor_id,
+            "recipient_id": m.recipient_id,
             "ensemble_score": m.ensemble_score,
             "compatibility_class": m.compatibility_class,
             "status": m.status.value,

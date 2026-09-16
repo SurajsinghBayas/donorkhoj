@@ -112,6 +112,8 @@ async def run_matching(
 
     # Run graph in background
     async def run_graph():
+        from ml.predict import to_json_safe, get_lime_explanation
+        lime_task = None
         try:
             graph = get_matching_graph()
             state = {
@@ -127,8 +129,28 @@ async def run_matching(
                 "stream_callback": None,
             }
 
-            # Stream steps to WebSocket if connected
+            # LIME is independent of the graph — run it concurrently, not after.
+            lime_task = asyncio.create_task(
+                asyncio.to_thread(get_lime_explanation, donor_data, recipient_data))
+
+            # Stream steps to WebSocket if connected AND persist progress to the
+            # job row, so late-connecting clients catch up via polling.
+            progress: list = []
+
+            async def persist_steps():
+                try:
+                    async with AsyncSessionLocal() as s:
+                        j = await s.get(AgentJob, job_id)
+                        if j and j.status == "running":
+                            j.steps = to_json_safe(list(progress))
+                            await s.commit()
+                except Exception:
+                    pass
+
             async def stream_cb(step_data):
+                if step_data.get("step") != "completed":
+                    progress.append(step_data)
+                    await persist_steps()
                 ws = active_connections.get(job_id)
                 if ws:
                     try:
@@ -140,14 +162,11 @@ async def run_matching(
             final_state = await graph.ainvoke(state)
 
             # Save match result
-            from ml.predict import to_json_safe
             ml = final_state.get("ml_result") or {}
             shap_state = to_json_safe(final_state.get("shap_result") or {})
             try:
-                from ml.predict import get_lime_explanation
-                lime_result = to_json_safe(await asyncio.to_thread(
-                    get_lime_explanation, donor_data, recipient_data
-                ))
+                lime_result = to_json_safe(await lime_task)
+                lime_task = None
             except Exception:
                 lime_result = None
             match_obj = Match(
@@ -196,6 +215,8 @@ async def run_matching(
                 except Exception:
                     pass
         except Exception as e:
+            if lime_task is not None and not lime_task.done():
+                lime_task.cancel()
             async with AsyncSessionLocal() as new_session:
                 j = await new_session.get(AgentJob, job_id)
                 if j:

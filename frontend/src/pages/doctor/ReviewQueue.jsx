@@ -13,6 +13,7 @@ import Spinner from '../../components/ui/Spinner';
 import Empty from '../../components/ui/Empty';
 import Drawer from '../../components/ui/Drawer';
 import ScoreRing from '../../components/ui/ScoreRing';
+import LabReportButton from '../../components/screening/LabReportButton';
 import { Textarea } from '../../components/ui/Field';
 
 export default function ReviewQueue() {
@@ -116,6 +117,18 @@ export default function ReviewQueue() {
                   <p className="mt-2 font-mono text-[11px] text-stone-400">
                     ID {selected.id.slice(0, 8)} · {formatDateTime(selected.created_at)}
                   </p>
+                </div>
+              </div>
+
+              <div className="mt-6">
+                <p className="micro mb-3">Source lab reports · verify before deciding</p>
+                <div className="flex flex-wrap gap-2.5">
+                  {selected.donor_id && (
+                    <LabReportButton userId={selected.donor_id} label={`Donor labs · ${selected.donor_name}`} />
+                  )}
+                  {selected.recipient_id && (
+                    <LabReportButton userId={selected.recipient_id} label={`Recipient labs · ${selected.recipient_name}`} />
+                  )}
                 </div>
               </div>
 

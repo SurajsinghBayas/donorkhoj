@@ -8,6 +8,7 @@ import { pct, titleCase, formatDate } from '../../lib/format';
 import PageHeader from '../../components/ui/PageHeader';
 import Card, { CardHeader } from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
+import LabReportButton from '../../components/screening/LabReportButton';
 import Badge from '../../components/ui/Badge';
 import Spinner from '../../components/ui/Spinner';
 import Empty from '../../components/ui/Empty';
@@ -36,9 +37,12 @@ export default function RecipientOverview() {
         title={`Hello, ${firstName}.`}
         description="Track your listing, your urgency score, and every match the pipeline has scored for you."
         actions={
-          <Link to="/recipient/find">
-            <Button variant="accent" icon={Search}>Find donors</Button>
-          </Link>
+          <div className="flex items-center gap-2.5">
+            {screened && <LabReportButton label="My lab report" />}
+            <Link to="/recipient/find">
+              <Button variant="accent" icon={Search}>Find donors</Button>
+            </Link>
+          </div>
         }
       />
 

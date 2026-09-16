@@ -10,6 +10,7 @@ import Badge from '../../components/ui/Badge';
 import Spinner from '../../components/ui/Spinner';
 import Empty from '../../components/ui/Empty';
 import ScoreRing from '../../components/ui/ScoreRing';
+import LabReportButton from '../../components/screening/LabReportButton';
 
 /** SHAP bars — which factors pushed the score up or down */
 function ShapList({ shap }) {
@@ -48,9 +49,12 @@ function ShapList({ shap }) {
   );
 }
 
-function MatchCard({ match }) {
+function MatchCard({ match, role }) {
   const [open, setOpen] = useState(false);
   const status = MATCH_STATUS[match.status] || { tone: 'stone', label: match.status };
+  const counterpartId = role === 'donor' ? match.recipient_id : match.donor_id;
+  const counterpartLabel = role === 'donor' ? (match.recipient_name || 'Recipient') : (match.donor_name || 'Donor');
+  const cleanName = (n) => (n || '').replace(/\s*\(.*?\)\s*/g, '');
 
   return (
     <Card pad={false} className="overflow-hidden">
@@ -67,6 +71,9 @@ function MatchCard({ match }) {
               {status.label}
             </Badge>
           </div>
+          <p className="mt-1 text-[13px] text-stone-600">
+            {role === 'donor' ? 'Recipient' : 'Donor'}: <b className="font-medium text-ink">{cleanName(role === 'donor' ? match.recipient_name : match.donor_name) || '—'}</b>
+          </p>
           <p className="mt-1 font-mono text-[11px] text-stone-400">
             ID {match.id.slice(0, 8)} · {formatDateTime(match.created_at)} · ensemble {pct(match.ensemble_score)}
           </p>
@@ -87,6 +94,12 @@ function MatchCard({ match }) {
             <p className="text-[13px] text-stone-400">No report attached to this match.</p>
           )}
           <ShapList shap={match.shap_values} />
+          {counterpartId && (
+            <div className="mt-5 pt-4 border-t border-stone-200">
+              <p className="micro mb-2.5">Human review · source labs</p>
+              <LabReportButton userId={counterpartId} label={`${counterpartLabel}’s lab report`} />
+            </div>
+          )}
         </div>
       )}
     </Card>
@@ -123,7 +136,7 @@ export default function MatchesPage({ role }) {
           </Card>
         ) : (
           <div className="space-y-3">
-            {matches.map((m) => <MatchCard key={m.id} match={m} />)}
+            {matches.map((m) => <MatchCard key={m.id} match={m} role={role} />)}
           </div>
         )}
       </div>

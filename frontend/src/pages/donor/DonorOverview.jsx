@@ -8,6 +8,7 @@ import { pct, titleCase, formatDate, bloodDisplay } from '../../lib/format';
 import PageHeader from '../../components/ui/PageHeader';
 import Card, { CardHeader } from '../../components/ui/Card';
 import Button from '../../components/ui/Button';
+import LabReportButton from '../../components/screening/LabReportButton';
 import Badge from '../../components/ui/Badge';
 import Spinner from '../../components/ui/Spinner';
 import Empty from '../../components/ui/Empty';
@@ -33,11 +34,14 @@ export default function DonorOverview() {
         title={`Hello, ${firstName}.`}
         description="Your screening, eligibility, and every match you are part of — in one place."
         actions={
-          <Link to="/donor/screening">
-            <Button variant={screened ? 'outline' : 'accent'} icon={ClipboardCheck}>
-              {screened ? 'Update screening' : 'Start screening'}
-            </Button>
-          </Link>
+          <div className="flex items-center gap-2.5">
+            {screened && <LabReportButton label="My lab report" />}
+            <Link to="/donor/screening">
+              <Button variant={screened ? 'outline' : 'accent'} icon={ClipboardCheck}>
+                {screened ? 'Update screening' : 'Start screening'}
+              </Button>
+            </Link>
+          </div>
         }
       />
 

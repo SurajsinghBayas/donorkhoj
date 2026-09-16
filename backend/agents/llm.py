@@ -24,6 +24,7 @@ def parse_model_chain(raw: str) -> list:
 
 
 def get_llm_client(model: str, **kwargs):
+    kwargs.setdefault("request_timeout", 30)  # hung free-tier calls fail fast into failover
     return ChatOpenAI(
         model=model,
         api_key=OPENROUTER_API_KEY,
@@ -59,11 +60,15 @@ async def ainvoke_with_retry(llm, messages: List, attempts: int = 4):
     raise last  # pragma: no cover
 
 
-async def ainvoke_with_fallback(build_llm, models: List[str], messages: List, rounds: int = 3):
+async def ainvoke_with_fallback(build_llm, models: List[str], messages: List, rounds: int = 3,
+                                validator=None):
     """Try each model in order, then repeat the chain with backoff between rounds.
 
     Failing over to the next provider is usually faster than retrying a
     throttled one, so a full round across all models comes before any sleep.
+
+    `validator` optionally checks the response (raise on unacceptable output);
+    validator failures fail over like other retryable errors.
 
     Returns (response, model_used). Raises the last error if everything fails.
     """
@@ -72,9 +77,13 @@ async def ainvoke_with_fallback(build_llm, models: List[str], messages: List, ro
         for m in models:
             try:
                 resp = await build_llm(m).ainvoke(messages)
+                if validator is not None:
+                    validator(resp)
                 return resp, m
             except Exception as e:  # noqa: BLE001
                 last = e
+                if validator is not None and isinstance(e, ValueError):
+                    continue  # unacceptable output — fail over, don't abort
                 if not _retryable(e):
                     raise
                 continue  # next model immediately

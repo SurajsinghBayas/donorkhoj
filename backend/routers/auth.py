@@ -20,8 +20,19 @@ class UserOut(BaseModel):
     role: str
     full_name: Optional[str] = None
     phone: Optional[str] = None
+    country: Optional[str] = None
     city: Optional[str] = None
     state: Optional[str] = None
+    hospital_name: Optional[str] = None
+
+
+def _to_user_out(user: User) -> UserOut:
+    role_str = user.role.value if hasattr(user.role, "value") else str(user.role)
+    return UserOut(
+        id=user.id, email=user.email, username=user.username, role=role_str,
+        full_name=user.full_name, phone=user.phone, country=user.country,
+        city=user.city, state=user.state, hospital_name=user.hospital_name,
+    )
 
 
 class RegisterRequest(BaseModel):
@@ -31,8 +42,19 @@ class RegisterRequest(BaseModel):
     role: UserRole
     full_name: Optional[str] = None
     phone: Optional[str] = None
+    country: Optional[str] = "India"
     city: Optional[str] = None
     state: Optional[str] = None
+    hospital_name: Optional[str] = None
+
+
+class ProfileUpdate(BaseModel):
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    country: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    hospital_name: Optional[str] = None
 
 
 class LoginRequest(BaseModel):
@@ -67,23 +89,13 @@ async def _authenticate_user(db: AsyncSession, identifier: str, password: str) -
 def _build_token_response(user: User) -> TokenResponse:
     role_str = user.role.value if hasattr(user.role, "value") else str(user.role)
     token = create_access_token({"sub": user.id, "role": role_str})
-    user_out = UserOut(
-        id=user.id,
-        email=user.email,
-        username=user.username,
-        role=role_str,
-        full_name=user.full_name,
-        phone=user.phone,
-        city=user.city,
-        state=user.state,
-    )
     return TokenResponse(
         access_token=token,
         token_type="bearer",
         role=role_str,
         user_id=user.id,
         username=user.username,
-        user=user_out,
+        user=_to_user_out(user),
     )
 
 
@@ -105,8 +117,10 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
         role=data.role,
         full_name=data.full_name,
         phone=data.phone,
+        country=data.country or "India",
         city=data.city,
         state=data.state,
+        hospital_name=data.hospital_name,
     )
     db.add(user)
     await db.commit()
@@ -144,17 +158,7 @@ async def get_me(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    role_str = user.role.value if hasattr(user.role, "value") else str(user.role)
-    return {
-        "id": user.id,
-        "email": user.email,
-        "username": user.username,
-        "role": role_str,
-        "full_name": user.full_name,
-        "phone": user.phone,
-        "city": user.city,
-        "state": user.state,
-    }
+    return _to_user_out(user)
 
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> User:
@@ -166,4 +170,17 @@ async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+
+
+@router.put("/profile", response_model=UserOut)
+async def update_profile(data: ProfileUpdate, current_user: User = Depends(get_current_user),
+                         db: AsyncSession = Depends(get_db)):
+    """Update your own profile: contact, location, and treating hospital."""
+    for field in ("full_name", "phone", "country", "city", "state", "hospital_name"):
+        val = getattr(data, field)
+        if val is not None:
+            setattr(current_user, field, val.strip() if isinstance(val, str) else val)
+    await db.commit()
+    await db.refresh(current_user)
+    return _to_user_out(current_user)
 
