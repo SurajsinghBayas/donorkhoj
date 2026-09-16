@@ -12,6 +12,10 @@ import uuid
 router = APIRouter(prefix="/screening", tags=["screening"])
 
 
+def _role(user: User) -> str:
+    return user.role.value if hasattr(user.role, "value") else str(user.role)
+
+
 class ScreeningData(BaseModel):
     # Step 1 - Basic
     blood_group: Optional[str] = None
@@ -60,10 +64,10 @@ async def submit_screening(data: ScreeningData, current_user: User = Depends(get
     result = await db.execute(select(MedicalScreening).where(MedicalScreening.user_id == current_user.id))
     existing = result.scalar_one_or_none()
 
-    eligibility = check_eligibility(data.dict(), current_user.role.value)
+    eligibility = check_eligibility(data.model_dump(), _role(current_user))
 
     values = {
-        **data.dict(),
+        **data.model_dump(),
         "user_id": current_user.id,
         "is_eligible": eligibility["eligible"],
         "eligibility_reasons": eligibility["reasons"],
@@ -96,7 +100,7 @@ async def get_my_screening(current_user: User = Depends(get_current_user), db: A
 
 @router.get("/{user_id}")
 async def get_screening(user_id: str, current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
-    if current_user.role.value not in ["doctor", "admin"] and current_user.id != user_id:
+    if _role(current_user) not in ["doctor", "admin"] and current_user.id != user_id:
         raise HTTPException(status_code=403, detail="Not authorized")
     result = await db.execute(select(MedicalScreening).where(MedicalScreening.user_id == user_id))
     screening = result.scalar_one_or_none()

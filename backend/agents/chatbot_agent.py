@@ -7,22 +7,18 @@ from typing import List, Dict, AsyncGenerator
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import HumanMessage, SystemMessage, AIMessage
 from agents.prompts import CHATBOT_PROMPT
+from agents.llm import get_llm_client, RETRY_DELAYS, parse_model_chain
+import asyncio
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-CHATBOT_MODEL = os.getenv("CHATBOT_MODEL", "deepseek/deepseek-r1-distill-qwen-32b:free")
+CHATBOT_MODELS = parse_model_chain(os.getenv(
+    "CHATBOT_MODEL", "google/gemma-4-31b-it:free,nex-agi/nex-n2.5-pro:free"))
+CHATBOT_MODEL = CHATBOT_MODELS[0] if CHATBOT_MODELS else "google/gemma-4-31b-it:free"
 
 
 def get_chatbot_llm(streaming: bool = False):
-    return ChatOpenAI(
-        model=CHATBOT_MODEL,
-        api_key=OPENROUTER_API_KEY,
-        base_url=OPENROUTER_BASE_URL,
-        default_headers={"HTTP-Referer": "https://donorkhoj.in", "X-Title": "DonorKhoj"},
-        temperature=0.3,
-        max_retries=3,
-        streaming=streaming,
-    )
+    return get_llm_client(CHATBOT_MODEL, streaming=streaming, temperature=0.3)
 
 
 def build_context(user_data: dict, screening_data: dict, match_data: dict) -> str:
@@ -53,7 +49,6 @@ async def chat_stream(
     match_data: dict = {},
 ) -> AsyncGenerator[str, None]:
     """Stream chatbot response token by token."""
-    llm = get_chatbot_llm(streaming=True)
     context = build_context(user_data, screening_data, match_data)
 
     system = f"""{CHATBOT_PROMPT}
@@ -71,12 +66,28 @@ Always personalize your response based on the patient's actual data above."""
             messages.append(AIMessage(content=msg["content"]))
     messages.append(HumanMessage(content=message))
 
-    try:
-        async for chunk in llm.astream(messages):
-            if chunk.content:
-                yield chunk.content
-    except Exception as e:
-        yield f"I'm having trouble connecting right now. Please try again in a moment. (Error: {str(e)[:50]})"
+    from agents.llm import _retryable
+    streamed_any = False
+    for model in CHATBOT_MODELS:
+        llm = get_llm_client(model, streaming=True, temperature=0.3)
+        for attempt in range(2):
+            try:
+                async for chunk in llm.astream(messages):
+                    if chunk.content:
+                        streamed_any = True
+                        yield chunk.content
+                return
+            except Exception as e:
+                # Fail over only if nothing streamed yet (can't rewind a stream)
+                if streamed_any:
+                    return
+                if _retryable(e) and attempt < 1:
+                    await asyncio.sleep(RETRY_DELAYS[min(attempt, len(RETRY_DELAYS) - 1)])
+                    continue
+                break  # try next model
+        continue
+    if not streamed_any:
+        yield "I'm having trouble connecting right now. Please try again in a moment."
 
 
 async def chat_once(
@@ -87,7 +98,6 @@ async def chat_once(
     match_data: dict = {},
 ) -> str:
     """Non-streaming chat response."""
-    llm = get_chatbot_llm(streaming=False)
     context = build_context(user_data, screening_data, match_data)
 
     system = f"""{CHATBOT_PROMPT}
@@ -104,7 +114,9 @@ PATIENT CONTEXT:
     messages.append(HumanMessage(content=message))
 
     try:
-        response = await llm.ainvoke(messages)
+        from agents.llm import ainvoke_with_fallback
+        build = lambda m: get_llm_client(m, streaming=False, temperature=0.3)
+        response, _ = await ainvoke_with_fallback(build, CHATBOT_MODELS, messages)
         return response.content
     except Exception as e:
         return f"I'm having trouble connecting. Please try again shortly."

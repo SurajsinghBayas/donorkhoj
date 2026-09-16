@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from pydantic import BaseModel
 from typing import Optional, List
-from database import get_db
+from database import get_db, AsyncSessionLocal
 from models.models import User, MedicalScreening, Match, AgentJob, ChatMessage, MatchStatus
 from routers.auth import get_current_user
 from agents.medical_agent import analyze_lab_report
@@ -24,6 +24,10 @@ router = APIRouter(prefix="/agents", tags=["agents"])
 
 # ─── Active WebSocket connections ─────────────────────────────────────────────
 active_connections: dict[str, WebSocket] = {}
+
+
+def _role(user: User) -> str:
+    return user.role.value if hasattr(user.role, "value") else str(user.role)
 
 
 class ChatRequest(BaseModel):
@@ -136,7 +140,16 @@ async def run_matching(
             final_state = await graph.ainvoke(state)
 
             # Save match result
+            from ml.predict import to_json_safe
             ml = final_state.get("ml_result") or {}
+            shap_state = to_json_safe(final_state.get("shap_result") or {})
+            try:
+                from ml.predict import get_lime_explanation
+                lime_result = to_json_safe(await asyncio.to_thread(
+                    get_lime_explanation, donor_data, recipient_data
+                ))
+            except Exception:
+                lime_result = None
             match_obj = Match(
                 id=str(uuid.uuid4()),
                 donor_id=donor_id,
@@ -146,34 +159,44 @@ async def run_matching(
                 rf_score=ml.get("rf_score"),
                 ensemble_score=ml.get("ensemble_score"),
                 compatibility_class=ml.get("compatibility_class"),
-                shap_values=final_state.get("shap_result"),
+                shap_values=shap_state,
+                lime_values=lime_result,
                 agent_report=final_state.get("final_report"),
                 status=MatchStatus.COMPLETED,
             )
-            async with AsyncSession(db.bind) as new_session:
+            async with AsyncSessionLocal() as new_session:
                 new_session.add(match_obj)
                 j = await new_session.get(AgentJob, job_id)
                 if j:
                     j.status = "completed"
-                    j.result = {"match_id": match_obj.id, "steps": final_state.get("steps", [])}
-                    j.steps = final_state.get("steps", [])
+                    j.result = to_json_safe({
+                        "match_id": match_obj.id,
+                        "ensemble_score": ml.get("ensemble_score"),
+                        "compatibility_class": ml.get("compatibility_class"),
+                        "report": final_state.get("final_report"),
+                        "steps": final_state.get("steps", []),
+                    })
+                    j.steps = to_json_safe(final_state.get("steps", []))
                 await new_session.commit()
 
             # Notify WebSocket of completion
             ws = active_connections.get(job_id)
             if ws:
-                await ws.send_text(json.dumps({
-                    "step": "completed",
-                    "status": "completed",
-                    "data": {
-                        "match_id": match_obj.id,
-                        "ensemble_score": ml.get("ensemble_score"),
-                        "compatibility_class": ml.get("compatibility_class"),
-                        "report": final_state.get("final_report"),
-                    }
-                }))
+                try:
+                    await ws.send_text(json.dumps({
+                        "step": "completed",
+                        "status": "completed",
+                        "data": {
+                            "match_id": match_obj.id,
+                            "ensemble_score": ml.get("ensemble_score"),
+                            "compatibility_class": ml.get("compatibility_class"),
+                            "report": final_state.get("final_report"),
+                        }
+                    }))
+                except Exception:
+                    pass
         except Exception as e:
-            async with AsyncSession(db.bind) as new_session:
+            async with AsyncSessionLocal() as new_session:
                 j = await new_session.get(AgentJob, job_id)
                 if j:
                     j.status = "failed"
@@ -222,19 +245,25 @@ async def chat(
     )
     match = m_result.scalars().first()
 
-    user_data = {"full_name": current_user.full_name, "role": current_user.role.value, "city": current_user.city}
+    user_data = {"full_name": current_user.full_name, "role": _role(current_user), "city": current_user.city}
     screening_data = {c.name: getattr(screening, c.name) for c in screening.__table__.columns} if screening else {}
     match_data = {"ensemble_score": match.ensemble_score, "compatibility_class": match.compatibility_class} if match else {}
 
     async def generate():
+        full_response: list[str] = []
         async for token in chat_stream(request.message, request.history or [], user_data, screening_data, match_data):
+            full_response.append(token)
             yield f"data: {json.dumps({'token': token})}\n\n"
         yield "data: [DONE]\n\n"
 
-        # Save to history
-        async with AsyncSession(db.bind) as s:
-            s.add(ChatMessage(id=str(uuid.uuid4()), user_id=current_user.id, role="user", content=request.message))
-            await s.commit()
+        # Save full conversation turn to history
+        try:
+            async with AsyncSessionLocal() as s:
+                s.add(ChatMessage(id=str(uuid.uuid4()), user_id=current_user.id, role="user", content=request.message))
+                s.add(ChatMessage(id=str(uuid.uuid4()), user_id=current_user.id, role="assistant", content="".join(full_response)))
+                await s.commit()
+        except Exception:
+            pass
 
     return StreamingResponse(generate(), media_type="text/event-stream")
 

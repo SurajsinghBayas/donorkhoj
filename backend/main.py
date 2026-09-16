@@ -10,6 +10,11 @@ from routers import auth, screening, matching, agents
 
 load_dotenv()
 
+FRONTEND_URL = os.getenv("FRONTEND_URL", "")
+_allowed_origins = ["http://localhost:5173", "http://localhost:3000"]
+if FRONTEND_URL:
+    _allowed_origins += [o.strip() for o in FRONTEND_URL.split(",") if o.strip()]
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,7 +35,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173", "http://localhost:3000", "*"],
+    allow_origins=_allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

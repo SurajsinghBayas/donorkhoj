@@ -2,12 +2,16 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select, func
 from database import get_db
-from models.models import User, MedicalScreening, Match, MatchStatus
+from models.models import User, UserRole, MedicalScreening, Match, MatchStatus
 from routers.auth import get_current_user
 from ml.predict import predict_match
 import uuid
 
 router = APIRouter(prefix="/matching", tags=["matching"])
+
+
+def _role(user: User) -> str:
+    return user.role.value if hasattr(user.role, "value") else str(user.role)
 
 
 @router.get("/donors")
@@ -20,7 +24,7 @@ async def list_eligible_donors(
     result = await db.execute(
         select(User, MedicalScreening)
         .join(MedicalScreening, User.id == MedicalScreening.user_id)
-        .where(User.role == "donor")
+        .where(User.role == UserRole.DONOR)
         .where(MedicalScreening.is_eligible == True)
     )
     donors = result.all()
@@ -45,8 +49,11 @@ async def get_my_matches(
     db: AsyncSession = Depends(get_db),
 ):
     """Get all matches for the current user."""
-    if current_user.role.value == "donor":
+    role = _role(current_user)
+    if role == "donor":
         result = await db.execute(select(Match).where(Match.donor_id == current_user.id).order_by(Match.created_at.desc()))
+    elif role in ("doctor", "admin"):
+        result = await db.execute(select(Match).order_by(Match.created_at.desc()).limit(50))
     else:
         result = await db.execute(select(Match).where(Match.recipient_id == current_user.id).order_by(Match.created_at.desc()))
     matches = result.scalars().all()
@@ -68,7 +75,7 @@ async def get_my_matches(
 @router.get("/matches/pending")
 async def get_pending_matches(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     """Doctor: Get all matches pending approval."""
-    if current_user.role.value not in ["doctor", "admin"]:
+    if _role(current_user) not in ["doctor", "admin"]:
         raise HTTPException(status_code=403, detail="Doctors only")
     result = await db.execute(
         select(Match).where(Match.status == MatchStatus.COMPLETED).order_by(Match.created_at.desc()).limit(50)
@@ -99,7 +106,7 @@ async def approve_match(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if current_user.role.value not in ["doctor", "admin"]:
+    if _role(current_user) not in ["doctor", "admin"]:
         raise HTTPException(status_code=403, detail="Doctors only")
     match = await db.get(Match, match_id)
     if not match:
@@ -118,7 +125,7 @@ async def reject_match(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_db),
 ):
-    if current_user.role.value not in ["doctor", "admin"]:
+    if _role(current_user) not in ["doctor", "admin"]:
         raise HTTPException(status_code=403, detail="Doctors only")
     match = await db.get(Match, match_id)
     if not match:
@@ -133,8 +140,8 @@ async def reject_match(
 @router.get("/stats")
 async def get_stats(current_user: User = Depends(get_current_user), db: AsyncSession = Depends(get_db)):
     total_users = (await db.execute(select(func.count(User.id)))).scalar()
-    total_donors = (await db.execute(select(func.count(User.id)).where(User.role == "donor"))).scalar()
-    total_recipients = (await db.execute(select(func.count(User.id)).where(User.role == "recipient"))).scalar()
+    total_donors = (await db.execute(select(func.count(User.id)).where(User.role == UserRole.DONOR))).scalar()
+    total_recipients = (await db.execute(select(func.count(User.id)).where(User.role == UserRole.RECIPIENT))).scalar()
     total_matches = (await db.execute(select(func.count(Match.id)))).scalar()
     approved = (await db.execute(select(func.count(Match.id)).where(Match.status == MatchStatus.APPROVED))).scalar()
     return {

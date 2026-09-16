@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 from database import get_db
 from models.models import User, UserRole
@@ -10,13 +10,24 @@ from auth import verify_password, get_password_hash, create_access_token, decode
 import uuid
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/login")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/auth/token")
+
+
+class UserOut(BaseModel):
+    id: str
+    email: str
+    username: str
+    role: str
+    full_name: Optional[str] = None
+    phone: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
 
 
 class RegisterRequest(BaseModel):
     email: EmailStr
     username: str
-    password: str
+    password: str = Field(min_length=6, max_length=128)
     role: UserRole
     full_name: Optional[str] = None
     phone: Optional[str] = None
@@ -25,7 +36,8 @@ class RegisterRequest(BaseModel):
 
 
 class LoginRequest(BaseModel):
-    email: str
+    username: Optional[str] = None
+    email: Optional[str] = None
     password: str
 
 
@@ -35,6 +47,44 @@ class TokenResponse(BaseModel):
     role: str
     user_id: str
     username: str
+    user: UserOut
+
+
+async def _authenticate_user(db: AsyncSession, identifier: str, password: str) -> User:
+    if not identifier or not password:
+        raise HTTPException(status_code=400, detail="Username or email and password are required")
+
+    stmt = select(User).where((User.username == identifier) | (User.email == identifier))
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
+    if not user or not verify_password(password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Invalid username/email or password")
+
+    return user
+
+
+def _build_token_response(user: User) -> TokenResponse:
+    role_str = user.role.value if hasattr(user.role, "value") else str(user.role)
+    token = create_access_token({"sub": user.id, "role": role_str})
+    user_out = UserOut(
+        id=user.id,
+        email=user.email,
+        username=user.username,
+        role=role_str,
+        full_name=user.full_name,
+        phone=user.phone,
+        city=user.city,
+        state=user.state,
+    )
+    return TokenResponse(
+        access_token=token,
+        token_type="bearer",
+        role=role_str,
+        user_id=user.id,
+        username=user.username,
+        user=user_out,
+    )
 
 
 @router.post("/register", response_model=TokenResponse)
@@ -42,9 +92,11 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     result = await db.execute(select(User).where(User.email == data.email))
     if result.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Email already registered")
+
     result2 = await db.execute(select(User).where(User.username == data.username))
     if result2.scalar_one_or_none():
         raise HTTPException(status_code=400, detail="Username already taken")
+
     user = User(
         id=str(uuid.uuid4()),
         email=data.email,
@@ -59,38 +111,59 @@ async def register(data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     db.add(user)
     await db.commit()
     await db.refresh(user)
-    token = create_access_token({"sub": user.id, "role": user.role.value})
-    return TokenResponse(access_token=token, token_type="bearer", role=user.role.value, user_id=user.id, username=user.username)
+    return _build_token_response(user)
+
+
+@router.post("/token", response_model=TokenResponse)
+async def token_login(
+    form_data: OAuth2PasswordRequestForm = Depends(),
+    db: AsyncSession = Depends(get_db),
+):
+    user = await _authenticate_user(db, form_data.username, form_data.password)
+    return _build_token_response(user)
 
 
 @router.post("/login", response_model=TokenResponse)
-async def login(data: LoginRequest, db: AsyncSession = Depends(get_db)):
-    result = await db.execute(select(User).where(User.email == data.email))
-    user = result.scalar_one_or_none()
-    if not user or not verify_password(data.password, user.hashed_password):
-        raise HTTPException(status_code=401, detail="Invalid email or password")
-    token = create_access_token({"sub": user.id, "role": user.role.value})
-    return TokenResponse(access_token=token, token_type="bearer", role=user.role.value, user_id=user.id, username=user.username)
+async def json_login(
+    data: LoginRequest,
+    db: AsyncSession = Depends(get_db),
+):
+    identifier = data.username or data.email
+    if not identifier:
+        raise HTTPException(status_code=400, detail="Username or email is required")
+    user = await _authenticate_user(db, identifier, data.password)
+    return _build_token_response(user)
 
 
 @router.get("/me")
 async def get_me(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)):
     payload = decode_token(token)
-    if not payload:
+    if not payload or not payload.get("sub"):
         raise HTTPException(status_code=401, detail="Invalid token")
     result = await db.execute(select(User).where(User.id == payload["sub"]))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
-    return {"id": user.id, "email": user.email, "username": user.username, "role": user.role.value, "full_name": user.full_name, "city": user.city, "state": user.state}
+    role_str = user.role.value if hasattr(user.role, "value") else str(user.role)
+    return {
+        "id": user.id,
+        "email": user.email,
+        "username": user.username,
+        "role": role_str,
+        "full_name": user.full_name,
+        "phone": user.phone,
+        "city": user.city,
+        "state": user.state,
+    }
 
 
 async def get_current_user(token: str = Depends(oauth2_scheme), db: AsyncSession = Depends(get_db)) -> User:
     payload = decode_token(token)
-    if not payload:
+    if not payload or not payload.get("sub"):
         raise HTTPException(status_code=401, detail="Invalid token")
     result = await db.execute(select(User).where(User.id == payload["sub"]))
     user = result.scalar_one_or_none()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
+

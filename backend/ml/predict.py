@@ -14,6 +14,45 @@ _encoders = None
 _feature_cols = None
 
 
+def to_json_safe(obj):
+    """Recursively convert obj into strict-JSON-safe plain Python types.
+
+    Handles tuples, numpy scalars/arrays, NaN/Inf (→ None) and
+    datetimes/date — everything stored in Postgres JSONB columns
+    must pass through this first.
+    """
+    import math
+    import datetime
+    if obj is None or isinstance(obj, (bool, str)):
+        return obj
+    if isinstance(obj, float):
+        return obj if math.isfinite(obj) else None
+    if isinstance(obj, int):
+        return obj
+    if isinstance(obj, dict):
+        return {str(k): to_json_safe(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [to_json_safe(v) for v in obj]
+    if isinstance(obj, (datetime.datetime, datetime.date)):
+        return obj.isoformat()
+    # numpy scalars / arrays and anything with tolist()
+    if hasattr(obj, "tolist"):
+        try:
+            return to_json_safe(obj.tolist())
+        except Exception:
+            return str(obj)
+    if type(obj).__module__.startswith("numpy"):
+        try:
+            return to_json_safe(obj.item())
+        except Exception:
+            return str(obj)
+    try:
+        float(obj)
+        return to_json_safe(float(obj))
+    except Exception:
+        return str(obj)
+
+
 def _load_models():
     global _xgb_model, _rf_model, _encoders, _feature_cols
     if _xgb_model is None:
@@ -108,32 +147,48 @@ def get_shap_explanation(donor_data: Dict, recipient_data: Dict) -> Dict:
     explainer = shap.TreeExplainer(_xgb_model)
     shap_values = explainer.shap_values(X)
     feature_names = _feature_cols
-    return {
+    return to_json_safe({
         "shap_values": dict(zip(feature_names, shap_values[0].tolist())),
         "base_value": float(explainer.expected_value),
-    }
+    })
+
+
+_X_train_bg = None
+
+
+def _get_background_data():
+    """Load (once) the encoded training matrix for LIME's background distribution."""
+    global _X_train_bg
+    if _X_train_bg is None:
+        from ml.train import load_and_prepare
+        X_train, _, _, _ = load_and_prepare()
+        _X_train_bg = X_train
+    return _X_train_bg
 
 
 def get_lime_explanation(donor_data: Dict, recipient_data: Dict, num_features: int = 10) -> Dict:
     import lime.lime_tabular
-    import pandas as pd
     _load_models()
-    
-    # Load training data for background distribution
-    data_path = os.path.join(os.path.dirname(__file__), "data", "india_organ_match_data.csv")
-    df = pd.read_csv(data_path)
-    
-    from ml.train import load_and_prepare
-    X_train, _, _, _ = load_and_prepare()
-    
+
+    X_train = _get_background_data()
+
     explainer = lime.lime_tabular.LimeTabularExplainer(
         X_train, feature_names=_feature_cols, class_names=["Incompatible", "Compatible"],
         mode="classification", discretize_continuous=True, random_state=42
     )
     X = encode_features(donor_data, recipient_data)[0]
     exp = explainer.explain_instance(X, _xgb_model.predict_proba, num_features=num_features)
-    
-    return {
+
+    try:
+        local_pred = exp.local_pred
+        if hasattr(local_pred, "tolist"):
+            local_pred = local_pred.tolist()
+        elif isinstance(local_pred, np.ndarray):
+            local_pred = local_pred.tolist()
+    except Exception:
+        local_pred = []
+
+    return to_json_safe({
         "lime_features": [{"feature": f, "weight": w} for f, w in exp.as_list()],
-        "local_prediction": exp.local_pred.tolist() if hasattr(exp, 'local_pred') else [],
-    }
+        "local_prediction": local_pred if isinstance(local_pred, list) else [local_pred],
+    })

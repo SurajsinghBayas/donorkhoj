@@ -143,7 +143,7 @@ async def seed():
             xgb_score=0.962,
             rf_score=0.951,
             ensemble_score=0.956,
-            compatibility_class="HIGHLY_COMPATIBLE",
+            compatibility_class="High",
             status=MatchStatus.COMPLETED,
             agent_report="""### AI Clinical Match Report (Llama 3.3 70B)
 **Match Score**: 95.6% (HIGHLY COMPATIBLE)

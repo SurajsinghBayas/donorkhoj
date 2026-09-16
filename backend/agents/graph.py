@@ -12,25 +12,17 @@ from langgraph.graph import StateGraph, END
 from langgraph.prebuilt import ToolNode
 from agents.prompts import MATCHING_AGENT_PROMPT
 from agents.tools import run_ml_match_tool, get_shap_explanation_tool, validate_lab_values_tool
+from agents.llm import get_llm_client, ainvoke_with_fallback, parse_model_chain
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY", "")
 OPENROUTER_BASE_URL = os.getenv("OPENROUTER_BASE_URL", "https://openrouter.ai/api/v1")
-MATCHING_MODEL = os.getenv("MATCHING_AGENT_MODEL", "meta-llama/llama-3.3-70b-instruct:free")
+MATCHING_MODELS = parse_model_chain(os.getenv(
+    "MATCHING_AGENT_MODEL", "nex-agi/nex-n2.5-pro:free,google/gemma-4-31b-it:free"))
+MATCHING_MODEL = MATCHING_MODELS[0] if MATCHING_MODELS else "nex-agi/nex-n2.5-pro:free"
 
 
 def get_llm(model: str, streaming: bool = False):
-    return ChatOpenAI(
-        model=model,
-        api_key=OPENROUTER_API_KEY,
-        base_url=OPENROUTER_BASE_URL,
-        streaming=streaming,
-        default_headers={
-            "HTTP-Referer": "https://donorkhoj.in",
-            "X-Title": "DonorKhoj",
-        },
-        temperature=0.1,
-        max_retries=3,
-    )
+    return get_llm_client(model, streaming=streaming, temperature=0.1)
 
 
 # ─── Matching Pipeline State ───────────────────────────────────────────────────
@@ -53,7 +45,13 @@ def add_step(state: MatchingState, step_name: str, status: str, data: Any = None
     steps.append({"step": step_name, "status": status, "data": data})
     cb = state.get("stream_callback")
     if cb:
-        asyncio.create_task(cb({"step": step_name, "status": status, "data": data}))
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is not None:
+            task = loop.create_task(cb({"step": step_name, "status": status, "data": data}))
+            task.add_done_callback(lambda t: t.exception() if not t.cancelled() else None)
     return steps
 
 
@@ -77,15 +75,25 @@ async def node_organ_quality(state: MatchingState) -> MatchingState:
     organ = state.get("organ", "kidney")
     quality_flags = []
 
+    # (field, threshold, message, higher_is_worse)
     checks = {
-        "kidney": [("egfr", 60, "eGFR < 60 — suboptimal kidney quality"), ("creatinine", None, None)],
-        "liver": [("alt", 56, "ALT elevated"), ("ast", 40, "AST elevated"), ("bilirubin_total", 1.2, "Bilirubin elevated")],
-        "heart": [("ejection_fraction", 55, "EF below normal range")],
-        "lung": [("fev1_percent", 80, "FEV1 below normal range")],
+        "kidney": [("egfr", 60, "eGFR < 60 — suboptimal kidney quality", False),
+                   ("creatinine", 1.2, "Creatinine elevated — kidney review advised", True)],
+        "liver": [("alt", 56, "ALT elevated", True),
+                  ("ast", 40, "AST elevated", True),
+                  ("bilirubin_total", 1.2, "Bilirubin elevated", True)],
+        "heart": [("ejection_fraction", 55, "EF below normal range", False)],
+        "lung": [("fev1_percent", 80, "FEV1 below normal range", False)],
     }
-    for field, threshold, msg in checks.get(organ, []):
+    for field, threshold, msg, higher_is_worse in checks.get(organ, []):
         val = donor.get(field)
-        if val and threshold and val < threshold:
+        if val is None or threshold is None:
+            continue
+        try:
+            val = float(val)
+        except (TypeError, ValueError):
+            continue
+        if (higher_is_worse and val > threshold) or (not higher_is_worse and val < threshold):
             quality_flags.append(msg)
 
     result = {"organ": organ, "quality_flags": quality_flags, "organ_ok": len(quality_flags) == 0}
@@ -123,7 +131,6 @@ async def node_shap_lime(state: MatchingState) -> MatchingState:
 async def node_generate_report(state: MatchingState) -> MatchingState:
     steps = add_step(state, "report", "running")
     try:
-        llm = get_llm(MATCHING_MODEL)
         ml = state.get("ml_result") or {}
         elig = state.get("eligibility_result") or {}
         shap = state.get("shap_result") or {}
@@ -143,7 +150,11 @@ TOP SHAP FEATURES (most influential factors):
 Write a structured clinical report with: Executive Summary, Compatibility Analysis, Risk Factors, Recommendations.
 Keep it concise (200-250 words). Use Indian transplant guidelines context."""
 
-        response = await llm.ainvoke([SystemMessage(content=MATCHING_AGENT_PROMPT), HumanMessage(content=prompt)])
+        build = lambda m: get_llm_client(m, temperature=0.1)
+        response, _ = await ainvoke_with_fallback(
+            build, MATCHING_MODELS,
+            [SystemMessage(content=MATCHING_AGENT_PROMPT), HumanMessage(content=prompt)],
+        )
         report = response.content
         steps = add_step({**state, "steps": steps}, "report", "completed")
         return {**state, "final_report": report, "steps": steps}
