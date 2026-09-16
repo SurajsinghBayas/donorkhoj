@@ -1,0 +1,75 @@
+# ─── Secrets & Environment ───────────────────────────────────────────────────
+.env
+.env.*
+!.env.example
+
+# ─── Python / Backend ────────────────────────────────────────────────────────
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+*.pyc
+*.egg
+*.egg-info/
+dist/
+build/
+*.so
+
+# Virtual environments
+backend/venv/
+venv/
+.venv/
+env/
+ENV/
+
+# ML artefacts
+*.pkl
+*.joblib
+*.h5
+*.pt
+*.pth
+*.onnx
+backend/ml/models/
+backend/ml/*.pkl
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# MyPy / Pyright
+.mypy_cache/
+.dmypy.json
+dmypy.json
+.pyright/
+
+# Pytest
+.pytest_cache/
+.coverage
+htmlcov/
+
+# ─── Node / Frontend ─────────────────────────────────────────────────────────
+frontend/node_modules/
+node_modules/
+frontend/dist/
+frontend/dist-ssr/
+*.local
+
+# Logs
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# ─── OS & Editor ─────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/*
+!.vscode/extensions.json
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
