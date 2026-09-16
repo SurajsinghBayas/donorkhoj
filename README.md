@@ -357,11 +357,60 @@ Retraining is verified in an isolated copy of `ml/` so production model artifact
 
 ## Deployment Notes
 
-- Set a strong `SECRET_KEY` and a production `DATABASE_URL`; never ship the bundled `.env`.
-- Restrict CORS via `FRONTEND_URL` (defaults cover local Vite/CRA ports only).
-- Run Uvicorn behind a process manager (systemd/supervisor) with `--workers 2+`; the matching pipeline runs as asyncio background tasks on the same process.
-- The frontend is a static Vite build (`npm run build` → `dist/`) — serve via any static host and set `VITE_API_URL` / `VITE_WS_URL` at build time.
-- Pinned dependencies matter: `httpx` is capped for `openai==1.47` compatibility, and `train.py` targets `xgboost==2.1` APIs.
+### Backend → AWS EC2
+
+Two supported paths. Both assume an Ubuntu 22.04/24.04 instance with an Elastic IP and a domain (e.g. `api.donorkhoj.in`) pointing at it.
+
+**Option A — native (systemd + nginx), recommended**
+
+```bash
+# 1. Clone and configure
+sudo mkdir -p /opt/donorkhoj && sudo chown $USER:$USER /opt/donorkhoj
+git clone https://github.com/SurajsinghBayas/donorkhoj.git /opt/donorkhoj
+cp /opt/donorkhoj/backend/.env.example /opt/donorkhoj/backend/.env
+nano /opt/donorkhoj/backend/.env   # DATABASE_URL, SECRET_KEY (≥32 random chars),
+                                   # OPENROUTER_API_KEY, ENV=production,
+                                   # FRONTEND_URL=https://<your-app>.vercel.app
+
+# 2. Run the provisioner (Python, nginx, certbot, venv, systemd service)
+sudo bash /opt/donorkhoj/deploy/ec2-setup.sh
+
+# 3. Wire up nginx + TLS (edit server_name in deploy/nginx-donorkhoj.conf first)
+sudo cp deploy/nginx-donorkhoj.conf /etc/nginx/sites-available/donorkhoj
+sudo ln -sf /etc/nginx/sites-available/donorkhoj /etc/nginx/sites-enabled/donorkhoj
+sudo nginx -t && sudo systemctl reload nginx
+sudo certbot --nginx -d api.donorkhoj.in
+```
+
+The API runs as `donorkhoj.service` (gunicorn + 3 uvicorn workers, auto-restart, non-root hardening). Logs: `/var/log/donorkhoj/`. Operate with `sudo systemctl {status,restart} donorkhoj`.
+
+**Option B — Docker**
+
+```bash
+cd backend
+docker build -t donorkhoj-api .
+docker run -d --name donorkhoj-api --restart unless-stopped \
+  -p 127.0.0.1:8000:8000 --env-file .env donorkhoj-api
+```
+
+Use the same nginx config in front for TLS, rate limiting, and WebSocket proxying.
+
+### Frontend → Vercel
+
+1. Import the repo in Vercel, set **Root Directory** to `frontend` (the included `vercel.json` handles SPA rewrites, asset caching, and security headers — no extra config needed).
+2. Add the Environment Variable: `VITE_API_URL=https://api.donorkhoj.in` (your EC2 domain).
+3. Deploy. Afterward, add the Vercel URL to the backend's `FRONTEND_URL` and restart the API.
+
+### Production checklist
+
+- [ ] Strong `SECRET_KEY` (≥ 32 random chars) — the server refuses to boot in production without one.
+- [ ] `ENV=production` on the backend (tightens CORS to configured origins only).
+- [ ] Real `DATABASE_URL` with restricted DB credentials; backups enabled on the database.
+- [ ] `FRONTEND_URL` set to the exact Vercel URL.
+- [ ] TLS via certbot; HTTP → HTTPS redirect active (in the provided nginx config).
+- [ ] `/health` returns 200 with `"database": "up"` (it returns 503 if Postgres is unreachable — point EC2 health checks / Docker `HEALTHCHECK` at it).
+- [ ] `client_max_body_size` and proxy timeouts sized for lab-report uploads and long agent runs (already in the nginx config).
+- [ ] Never commit `.env` — only `.env.example` files are tracked.
 
 ---
 

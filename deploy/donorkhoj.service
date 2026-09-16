@@ -1,0 +1,29 @@
+[Unit]
+Description=DonorKhoj FastAPI backend
+After=network.target
+
+[Service]
+Type=simple
+# Adjust to the user you deploy as (NOT root)
+User=ubuntu
+WorkingDirectory=/opt/donorkhoj/backend
+# Load secrets from an EnvironmentFile, never bake them into the unit
+EnvironmentFile=/opt/donorkhoj/backend/.env
+Environment=ENV=production
+Environment=PORT=8000
+ExecStart=/opt/donorkhoj/backend/venv/bin/gunicorn main:app \
+  -k uvicorn.workers.UvicornWorker \
+  --bind 127.0.0.1:8000 \
+  --workers 3 \
+  --timeout 300 \
+  --graceful-timeout 30 \
+  --access-logfile /var/log/donorkhoj/access.log \
+  --error-logfile /var/log/donorkhoj/error.log
+Restart=always
+RestartSec=5
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

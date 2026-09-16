@@ -7,4 +7,9 @@ export default defineConfig({
     tailwindcss(),
     react(),
   ],
+  build: {
+    // Single-file app shell; chunk is large due to recharts + framer-motion.
+    // Vercel serves it gzipped (~209 kB) with immutable asset caching.
+    chunkSizeWarningLimit: 750,
+  },
 })
