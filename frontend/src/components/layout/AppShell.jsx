@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { NavLink, Outlet, useNavigate } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate, Link } from 'react-router-dom';
 import {
   LayoutGrid, ClipboardCheck, Search, HeartHandshake,
   Inbox, BarChart3, LogOut, MessageSquare, Menu, X,
@@ -158,10 +158,13 @@ export default function AppShell() {
           <Outlet />
         </main>
 
-        <footer className="border-t border-stone-200 px-4 sm:px-8 py-5">
+        <footer className="border-t border-stone-200 px-4 sm:px-8 py-5 flex flex-wrap items-center justify-between gap-2">
           <p className="micro" style={{ fontSize: 10 }}>
             DonorKhoj · Aligned with NOTTO guidelines & THO Act 2011 · Not a substitute for clinical judgement
           </p>
+          <Link to="/how-it-works" className="micro hover:text-ink transition-colors" style={{ fontSize: 10 }}>
+            How the ML & agents work →
+          </Link>
         </footer>
       </div>
 

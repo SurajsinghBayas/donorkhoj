@@ -228,6 +228,7 @@ export default function Landing() {
             </p>
           </div>
           <div className="flex gap-8 text-[13px] font-medium text-stone-500">
+            <Link to="/how-it-works" className="hover:text-ink transition-colors">How it works</Link>
             <Link to="/login" className="hover:text-ink transition-colors">Sign in</Link>
             <Link to="/register" className="hover:text-ink transition-colors">Register</Link>
             <a href="#compliance" className="hover:text-ink transition-colors">Compliance</a>

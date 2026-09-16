@@ -229,12 +229,16 @@ npm run build                      # outputs to dist/
 
 | Role | Capabilities | Demo login |
 |------|--------------|------------|
-| Donor | Screening wizard, lab upload, match history | `donor1 / password123` |
-| Recipient | Workup, donor discovery, run pipeline, matches | `recipient1 / password123` |
+| Donor | Screening wizard, lab upload, match history | `donor1` … `donor4 / password123` |
+| Recipient | Workup, donor discovery, run pipeline, matches | `recipient1` … `recipient4 / password123` |
 | Doctor | Review queue, approve/reject with notes | `doctor1 / password123` |
 | Admin | Registry statistics | `admin1 / password123` |
 
-All demo accounts are created by `backend/seed.py`.
+All demo accounts use password `password123`. Base accounts come from `backend/seed.py`;
+run `backend/seed_demo.py` for the extended cohort (4 donors + 4 recipients with full
+workups across kidney, liver, and heart) plus pre-scored ML matches in every lifecycle
+state — pending review and approved — so the whole journey is visible immediately.
+An in-app tour of the ML model and agents lives at `/how-it-works` (linked in the footer).
 
 ---
 

@@ -6,6 +6,7 @@ import { useAppStore, homeFor } from './lib/store';
 import AppShell from './components/layout/AppShell';
 
 import Landing from './pages/Landing';
+import HowItWorks from './pages/HowItWorks';
 import Login from './pages/auth/Login';
 import Register from './pages/auth/Register';
 
@@ -60,6 +61,7 @@ export default function App() {
       <Routes>
         {/* Public */}
         <Route path="/" element={<Landing />} />
+        <Route path="/how-it-works" element={<HowItWorks />} />
         <Route path="/login" element={<Login />} />
         <Route path="/register" element={<Register />} />
 
